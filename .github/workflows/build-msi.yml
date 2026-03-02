@@ -1,0 +1,59 @@
+name: Build WAU MSI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Download upstream WAU source
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/Romanitho/Winget-AutoUpdate/archive/refs/heads/main.zip" -OutFile "wau-upstream.zip"
+          Expand-Archive -Path "wau-upstream.zip" -DestinationPath "."
+
+      - name: Overlay our modified files
+        shell: pwsh
+        run: |
+          Copy-Item "Sources\Winget-AutoUpdate\Winget-Upgrade.ps1"                       "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\" -Force
+          Copy-Item "Sources\Winget-AutoUpdate\config\WAU-MSI_Actions.ps1"               "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\config\" -Force
+          Copy-Item "Sources\Winget-AutoUpdate\WAU-UpdatePrompt.ps1"                     "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\" -Force
+          Copy-Item "Sources\Winget-AutoUpdate\WAU-UpdateNow.ps1"                        "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\" -Force
+          Copy-Item "Sources\Winget-AutoUpdate\functions\Get-UpdateDeadlines.ps1"        "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\functions\" -Force
+          Copy-Item "Sources\Winget-AutoUpdate\functions\Set-UpdateDeadline.ps1"         "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\functions\" -Force
+          Copy-Item "Sources\Winget-AutoUpdate\functions\Start-UpdatePromptTask.ps1"     "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\functions\" -Force
+
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.1
+          wix extension add WixToolset.UI.wixext/5.0.1 -g
+          wix extension add WixToolset.Util.wixext/5.0.1 -g
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          cd Winget-AutoUpdate-main\Sources\Wix
+          wix build -src build.wxs `
+            -ext WixToolset.Util.wixext `
+            -ext WixToolset.UI.wixext `
+            -out ..\..\..\WAU-deadline.msi `
+            -arch x64 `
+            -d Version=2.10.0.1 `
+            -d NextSemVer=2.10.0 `
+            -d Comment="DEADLINE-FEATURE" `
+            -d PreRelease=0
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WAU-deadline-msi
+          path: WAU-deadline.msi
+          retention-days: 30

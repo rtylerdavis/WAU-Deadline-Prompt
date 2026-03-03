@@ -140,7 +140,6 @@ $sortedRows = $appRows | Sort-Object DaysRemainingValue
                   BorderBrush="#CCCCCC"
                   BorderThickness="1"
                   Background="White"
-                  SelectionMode="None"
                   IsHitTestVisible="False"
                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListView.View>

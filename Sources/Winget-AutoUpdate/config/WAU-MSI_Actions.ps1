@@ -129,7 +129,7 @@ function Install-WingetAutoUpdate {
 
         # UpdatePrompt task (SYSTEM via ServiceUI.exe -- shows WPF deadline dialog in user's desktop session)
         $taskAction = New-ScheduledTaskAction -Execute "${InstallPath}ServiceUI.exe" `
-            -Argument "-process:explorer.exe conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -Sta -File WAU-UpdatePrompt.ps1" `
+            -Argument "-process:explorer.exe conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -Sta -File `"${InstallPath}WAU-UpdatePrompt.ps1`"" `
             -WorkingDirectory $InstallPath
         $taskPrincipal = New-ScheduledTaskPrincipal -UserId S-1-5-18 -RunLevel Highest
         $taskSettings = New-ScheduledTaskSettingsSet -Compatibility Win8 -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 00:15:00 -MultipleInstances IgnoreNew

@@ -270,25 +270,24 @@ if (Test-Network) {
         }
 
         #region DEADLINE CONFIG
-        # Read update deadline settings (system context only).
+        # Read update deadline settings (both system and user context need to know if
+        # deadline mode is active so that user context can skip its update loop).
         # DeadlineDays = 0 means deadline mode is disabled -- normal silent update behaviour applies.
         [int]$DeadlineDays = 0
         [int]$ReminderIntervalDays = 2
-        if ($Script:IsSystem) {
-            if ($null -ne $WAUConfig.WAU_UpdateDeadlineDays) {
-                try { $DeadlineDays = [int]$WAUConfig.WAU_UpdateDeadlineDays } catch {}
-            }
-            if ($null -ne $WAUConfig.WAU_ReminderIntervalDays) {
-                try { $ReminderIntervalDays = [int]$WAUConfig.WAU_ReminderIntervalDays } catch {}
-            }
+        if ($null -ne $WAUConfig.WAU_UpdateDeadlineDays) {
+            try { $DeadlineDays = [int]$WAUConfig.WAU_UpdateDeadlineDays } catch {}
+        }
+        if ($null -ne $WAUConfig.WAU_ReminderIntervalDays) {
+            try { $ReminderIntervalDays = [int]$WAUConfig.WAU_ReminderIntervalDays } catch {}
+        }
+        if ($Script:IsSystem -and $DeadlineDays -le 0) {
             # When deadline mode is disabled, purge any leftover registry entries so that
             # re-enabling deadline mode later does not treat old entries as instantly overdue.
-            if ($DeadlineDays -le 0) {
-                $DeadlineRegPath = "HKLM:\SOFTWARE\Romanitho\Winget-AutoUpdate\UpdateDeadlines"
-                if (Test-Path $DeadlineRegPath) {
-                    Remove-Item -Path $DeadlineRegPath -Recurse -Force -ErrorAction SilentlyContinue
-                    Write-ToLog "Deadline mode disabled -- registry entries purged"
-                }
+            $DeadlineRegPath = "HKLM:\SOFTWARE\Romanitho\Winget-AutoUpdate\UpdateDeadlines"
+            if (Test-Path $DeadlineRegPath) {
+                Remove-Item -Path $DeadlineRegPath -Recurse -Force -ErrorAction SilentlyContinue
+                Write-ToLog "Deadline mode disabled -- registry entries purged"
             }
         }
         #endregion DEADLINE CONFIG
@@ -322,7 +321,12 @@ if (Test-Network) {
             }
 
             #region DEADLINE MODE
-            if ($DeadlineDays -gt 0 -and $Script:IsSystem) {
+            # In user context, skip all updates when deadline mode is active --
+            # the SYSTEM task manages updates via the deadline prompt workflow.
+            if ($DeadlineDays -gt 0 -and -not $Script:IsSystem) {
+                Write-ToLog "Deadline mode active -- skipping user context updates (managed by SYSTEM task)" "Gray"
+            }
+            elseif ($DeadlineDays -gt 0 -and $Script:IsSystem) {
 
                 Write-ToLog "Deadline mode active - $DeadlineDays days to forced update" "Cyan"
 

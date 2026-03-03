@@ -128,8 +128,12 @@ function Install-WingetAutoUpdate {
         Register-ScheduledTask -TaskName 'Winget-AutoUpdate-Policies' -TaskPath 'WAU' -InputObject $task -Force | Out-Null
 
         # UpdatePrompt task (SYSTEM via ServiceUI.exe -- shows WPF deadline dialog in user's desktop session)
+        # EncodedCommand is required because ServiceUI.exe strips quotes from the command line
+        # passed to CreateProcessAsUser, breaking paths with spaces (e.g. "Program Files").
+        $promptCmd = "& '${InstallPath}WAU-UpdatePrompt.ps1'"
+        $encodedCmd = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($promptCmd))
         $taskAction = New-ScheduledTaskAction -Execute "${InstallPath}ServiceUI.exe" `
-            -Argument "-process:explorer.exe conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -Sta -File `"${InstallPath}WAU-UpdatePrompt.ps1`"" `
+            -Argument "-process:explorer.exe C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -Sta -WindowStyle Hidden -EncodedCommand $encodedCmd" `
             -WorkingDirectory $InstallPath
         $taskPrincipal = New-ScheduledTaskPrincipal -UserId S-1-5-18 -RunLevel Highest
         $taskSettings = New-ScheduledTaskSettingsSet -Compatibility Win8 -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 00:15:00 -MultipleInstances IgnoreNew

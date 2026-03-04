@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [master]
+    tags: ['v*']
 
 jobs:
   build:
@@ -29,6 +30,8 @@ jobs:
           Copy-Item "Sources\Winget-AutoUpdate\functions\Get-UpdateDeadlines.ps1"        "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\functions\" -Force
           Copy-Item "Sources\Winget-AutoUpdate\functions\Set-UpdateDeadline.ps1"         "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\functions\" -Force
           Copy-Item "Sources\Winget-AutoUpdate\functions\Start-UpdatePromptTask.ps1"     "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\functions\" -Force
+          Copy-Item "Sources\Policies\ADMX\WAU.admx"                                    "Winget-AutoUpdate-main\Sources\Policies\ADMX\" -Force
+          Copy-Item "Sources\Policies\ADMX\en-US\WAU.adml"                              "Winget-AutoUpdate-main\Sources\Policies\ADMX\en-US\" -Force
 
       - name: Install WiX
         shell: pwsh
@@ -44,7 +47,7 @@ jobs:
           wix build -src build.wxs `
             -ext WixToolset.Util.wixext `
             -ext WixToolset.UI.wixext `
-            -out ..\..\..\WAU-deadline.msi `
+            -out ..\..\..\WAU-Deadline-Prompt.msi `
             -arch x64 `
             -d Version=2.10.0.1 `
             -d NextSemVer=2.10.0 `
@@ -54,6 +57,13 @@ jobs:
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WAU-deadline-msi
-          path: WAU-deadline.msi
+          name: WAU-Deadline-Prompt-msi
+          path: WAU-Deadline-Prompt.msi
           retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: WAU-Deadline-Prompt.msi
+          generate_release_notes: true

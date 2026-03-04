@@ -22,3 +22,9 @@ HKLM:\SOFTWARE\Romanitho\Winget-AutoUpdate             (direct)
 | `WAU_CompanyName` | REG_SZ | *(empty)* | Custom company name displayed in the prompt header. For example, setting this to `Contoso` changes the header to "Contoso requires the following updates to be installed." If not set, defaults to "Your organization." |
 
 ADMX/ADML policy definition files are included under `Sources/Policies/ADMX/` for deployment via Group Policy or Intune Administrative Templates.
+
+## Future State
+
+- Intune/Managed Deployment testing needed with ADMX integration
+- Potentially moving upstream to Romanitho's WAU - integrating a solution for auto update in the interim
+- Adding logic for per-app updates, rather than all or nothing

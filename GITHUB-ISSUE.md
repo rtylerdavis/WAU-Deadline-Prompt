@@ -11,6 +11,8 @@ WAU updates apps silently, which is great for most scenarios. But in managed ent
 
 Tools like WSUS, Intune, and SCCM all offer deadline-based enforcement. WAU currently lacks this, which limits its usefulness as a primary patching tool in enterprises.
 
+This also addresses the request in #1121 (User Notification: Allow Deferrals) -- the implementation provides deferral via a time-based snooze with a configurable reminder interval, plus a hard deadline after which updates are forced.
+
 ### The Solution
 
 I've built a working implementation in my fork: https://github.com/rtylerdavis/WAU-Deadline-Prompt

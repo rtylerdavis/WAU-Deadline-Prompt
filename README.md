@@ -22,7 +22,3 @@ HKLM:\SOFTWARE\Romanitho\Winget-AutoUpdate             (direct)
 | `WAU_CompanyName` | REG_SZ | *(empty)* | Custom company name displayed in the prompt header. For example, setting this to `Contoso` changes the header to "Contoso requires the following updates to be installed." If not set, defaults to "Your organization." |
 
 ADMX/ADML policy definition files are included under `Sources/Policies/ADMX/` for deployment via Group Policy or Intune Administrative Templates.
-
-## Installation
-
-Download the MSI from the [latest release](https://github.com/rtylerdavis/WAU-Deadline-Prompt/releases) and install. The MSI includes all upstream WAU functionality plus the deadline enforcement feature. To enable deadline mode, set `WAU_UpdateDeadlineDays` to your desired value (e.g., `7` for a one-week deadline) via Group Policy or registry.

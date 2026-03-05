@@ -23,8 +23,12 @@ HKLM:\SOFTWARE\Romanitho\Winget-AutoUpdate             (direct)
 
 ADMX/ADML policy definition files are included under `Sources/Policies/ADMX/` for deployment via Group Policy or Intune Administrative Templates.
 
+## Installation Notes
+
+1. Recommended to install with DISABLUEWAUAUTOUPDATE=1 to prevent Romanitho's Winget-AutoUpdate from coming down on top of this fork.
+2. The UpdateDeadlineDays, and ReminderIntervalDays can either be set in the registry, or via ADMX, if UpdateDeadlineDays is left blank, this will behave the same as Romanitho's original.
+
 ## Future State
 
-- Intune/Managed Deployment testing needed with ADMX integration
 - Potentially moving upstream to Romanitho's WAU - integrating a solution for auto update in the interim
 - Adding logic for per-app updates, rather than all or nothing

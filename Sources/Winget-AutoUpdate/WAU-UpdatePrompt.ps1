@@ -8,19 +8,23 @@
     dialog listing apps with pending deadlines.
 
     User actions:
-        "Update Now"     -- fires Winget-AutoUpdate-UpdateNow task, then exits
-        "Remind Me"      -- writes NextPromptTime to HKLM, then exits
-        Window close (X) -- treated as Remind
-        Timeout (5 min)  -- treated as Remind
+        "Update Now"            -- fires Winget-AutoUpdate-UpdateNow task for all apps
+        "Update Selected (N)"   -- rewrites JSON with selected apps only, fires task, reminds for the rest
+        "Remind Me in X Days"   -- writes NextPromptTime to HKLM, then exits
+
+    The X button is blocked to prevent users from thinking they are circumventing
+    the system. A hidden auto-dismiss timer closes the dialog at
+    (ReminderIntervalDays - 1 hour) without writing NextPromptTime, so the next
+    WAU run will re-prompt with fresh data.
 
     Must be launched with PowerShell -Sta flag (STA apartment model required for WPF).
 
 .NOTES
     Scheduled task:  Winget-AutoUpdate-UpdatePrompt
     Run as:          SYSTEM (S-1-5-18), RunLevel Highest
-    Launch command:  ServiceUI.exe -process:explorer.exe conhost.exe --headless
+    Launch command:  ServiceUI.exe -process:explorer.exe
                          powershell.exe -NoProfile -ExecutionPolicy Bypass -Sta
-                         -File WAU-UpdatePrompt.ps1
+                         -WindowStyle Hidden -EncodedCommand <base64>
     Trigger:         On demand (started by Start-UpdatePromptTask.ps1)
     Instances:       IgnoreNew
 #>
@@ -40,6 +44,8 @@ Add-Type -AssemblyName WindowsBase
 # and DataTrigger value comparison.
 Add-Type -TypeDefinition @'
 public class WauAppRow {
+    public bool   IsSelected           { get; set; }
+    public string Id                   { get; set; }
     public string Name                 { get; set; }
     public string AvailableVersion     { get; set; }
     public string DeadlineDisplay      { get; set; }
@@ -89,6 +95,8 @@ foreach ($app in @($pendingData.Apps)) {
     $daysLeft = ($deadline - $today).Days
 
     $row = [WauAppRow]::new()
+    $row.IsSelected           = $false
+    $row.Id                   = $app.Id
     $row.Name                 = $app.Name
     $row.AvailableVersion     = $app.AvailableVersion
     $row.DeadlineDisplay      = $deadline.ToString('MMM d, yyyy')
@@ -126,6 +134,7 @@ $sortedRows = @($appRows | Sort-Object DaysRemainingValue)
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- Header -->
@@ -134,25 +143,41 @@ $sortedRows = @($appRows | Sort-Object DaysRemainingValue)
                    TextWrapping="Wrap"
                    FontSize="13"
                    FontWeight="SemiBold"
+                   Margin="0,0,0,6"/>
+
+        <!-- Instruction -->
+        <TextBlock Grid.Row="1"
+                   Name="InstructionText"
+                   TextWrapping="Wrap"
+                   FontSize="11"
+                   Foreground="#444444"
                    Margin="0,0,0,14"/>
 
         <!-- App list -->
-        <ListView Grid.Row="1"
+        <ListView Grid.Row="2"
                   Name="AppList"
                   MaxHeight="280"
                   Margin="0,0,0,12"
                   BorderBrush="#CCCCCC"
                   BorderThickness="1"
                   Background="White"
-                  IsHitTestVisible="False"
                   ScrollViewer.HorizontalScrollBarVisibility="Disabled">
             <ListView.View>
                 <GridView>
+                    <GridViewColumn Width="30">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"/>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
                     <GridViewColumn Header="Application"
-                                    Width="200"
+                                    Width="190"
                                     DisplayMemberBinding="{Binding Name}"/>
                     <GridViewColumn Header="Available Version"
-                                    Width="130"
+                                    Width="120"
                                     DisplayMemberBinding="{Binding AvailableVersion}"/>
                     <GridViewColumn Header="Required By"
                                     Width="100"
@@ -164,6 +189,7 @@ $sortedRows = @($appRows | Sort-Object DaysRemainingValue)
             </ListView.View>
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
+                    <Setter Property="Focusable" Value="False"/>
                     <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsUrgent}" Value="True">
@@ -176,38 +202,30 @@ $sortedRows = @($appRows | Sort-Object DaysRemainingValue)
         </ListView>
 
         <!-- Footer -->
-        <TextBlock Grid.Row="2"
+        <TextBlock Grid.Row="3"
                    Text="Updates will run in the background and restart affected applications if necessary."
                    TextWrapping="Wrap"
                    FontSize="11"
                    Foreground="#666666"
                    Margin="0,0,0,16"/>
 
-        <!-- Countdown + action buttons -->
-        <DockPanel Grid.Row="3">
-            <TextBlock Name="CountdownText"
-                       DockPanel.Dock="Left"
-                       VerticalAlignment="Center"
-                       FontSize="11"
-                       Foreground="#888888"
-                       Text=""/>
-            <StackPanel DockPanel.Dock="Right"
-                        Orientation="Horizontal"
-                        HorizontalAlignment="Right">
-                <Button Name="RemindButton"
-                        Width="170"
-                        Height="30"
-                        Margin="0,0,10,0"
-                        FontSize="12"/>
-                <Button Name="UpdateNowButton"
-                        Content="Update Now"
-                        Width="110"
-                        Height="30"
-                        FontSize="12"
-                        FontWeight="SemiBold"
-                        IsDefault="True"/>
-            </StackPanel>
-        </DockPanel>
+        <!-- Action buttons -->
+        <StackPanel Grid.Row="4"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button Name="RemindButton"
+                    Height="30"
+                    Margin="0,0,10,0"
+                    FontSize="12"
+                    Padding="16,0"/>
+            <Button Name="UpdateNowButton"
+                    Content="Update Now"
+                    Height="30"
+                    FontSize="12"
+                    FontWeight="SemiBold"
+                    IsDefault="True"
+                    Padding="16,0"/>
+        </StackPanel>
 
     </Grid>
 </Window>
@@ -218,11 +236,11 @@ $sortedRows = @($appRows | Sort-Object DaysRemainingValue)
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
 
-$appListCtrl  = $window.FindName('AppList')
-$remindBtn    = $window.FindName('RemindButton')
-$updateNowBtn = $window.FindName('UpdateNowButton')
-$countdownLbl = $window.FindName('CountdownText')
-$headerTxt    = $window.FindName('HeaderText')
+$appListCtrl    = $window.FindName('AppList')
+$remindBtn      = $window.FindName('RemindButton')
+$updateNowBtn   = $window.FindName('UpdateNowButton')
+$headerTxt      = $window.FindName('HeaderText')
+$instructionTxt = $window.FindName('InstructionText')
 
 # Set header text with company name if configured
 if ($companyName) {
@@ -231,6 +249,10 @@ if ($companyName) {
 else {
     $headerTxt.Text = "Your organization requires the following updates to be installed."
 }
+
+# Set instruction text
+$dayLabel = if ($reminderDays -ne 1) { 'days' } else { 'day' }
+$instructionTxt.Text = "Check the box next to apps you're ready to update now, or update all at once. If you don't update all apps now, you will be reminded in $reminderDays $dayLabel."
 
 # Set window icon from WAU's info.png if available
 $iconPath = Join-Path $PSScriptRoot 'icons\info.png'
@@ -243,76 +265,125 @@ if (Test-Path $iconPath) {
 }
 
 # Set button label with configured interval
-$remindBtn.Content = "Remind Me in $reminderDays Day$(if ($reminderDays -ne 1) { 's' })"
+$remindBtn.Content = "Remind Me in $reminderDays $dayLabel"
 
 # Populate the ListView
 $appListCtrl.ItemsSource = $sortedRows
 #endregion WINDOW SETUP
 
 #region INTERACTION LOGIC
-# Tracks the user's chosen action. Defaults to Remind so that
-# window-close (X) and timeout both result in snooze behaviour.
-$script:Action = 'Remind'
+# Tracks the user's chosen action. Defaults to Remind for safety.
+$script:Action     = 'Remind'
+$script:AllowClose = $false
 
-# 5-minute countdown -- treated as Remind on expiry
-$script:SecondsRemaining = 300
-
-$timer = New-Object System.Windows.Threading.DispatcherTimer
-$timer.Interval = [TimeSpan]::FromSeconds(1)
-$timer.Add_Tick({
-    $script:SecondsRemaining--
-
-    if ($script:SecondsRemaining -le 0) {
-        $timer.Stop()
-        $script:Action = 'Remind'
-        $window.Close()
-    }
-    else {
-        $mins = [Math]::Floor($script:SecondsRemaining / 60)
-        $secs = $script:SecondsRemaining % 60
-        $countdownLbl.Text = "Auto-dismissing in $($mins):$($secs.ToString('D2'))"
+# Block the X button -- users must choose Remind or Update.
+# Button handlers set AllowClose before calling Close().
+$window.Add_Closing({
+    param($sender, $e)
+    if (-not $script:AllowClose) {
+        $e.Cancel = $true
     }
 })
 
+# Hidden auto-dismiss timer: closes the dialog at (ReminderIntervalDays - 1 hour)
+# without writing NextPromptTime, so the next WAU run will re-prompt with fresh data.
+# Uses wall-clock comparison every 5 minutes to survive sleep/wake cycles.
+$dismissTime = [DateTime]::Now.AddDays($reminderDays).AddHours(-1)
+
+$timer = New-Object System.Windows.Threading.DispatcherTimer
+$timer.Interval = [TimeSpan]::FromMinutes(5)
+$timer.Add_Tick({
+    if ([DateTime]::Now -ge $dismissTime) {
+        $timer.Stop()
+        $script:AllowClose = $true
+        $script:Action = 'SilentDismiss'
+        $window.Close()
+    }
+})
+$timer.Start()
+
+# Checkbox state tracking -- update button text and Remind availability
+# when any checkbox in the ListView is toggled.
+$script:UpdateButtonState = {
+    $selectedCount = @($sortedRows | Where-Object { $_.IsSelected }).Count
+    if ($selectedCount -gt 0) {
+        $updateNowBtn.Content = "Update Selected ($selectedCount)"
+        $remindBtn.IsEnabled = $false
+    }
+    else {
+        $updateNowBtn.Content = 'Update Now'
+        $remindBtn.IsEnabled = $true
+    }
+}
+
+$appListCtrl.AddHandler(
+    [System.Windows.Controls.Primitives.ToggleButton]::CheckedEvent,
+    [System.Windows.RoutedEventHandler]{ & $script:UpdateButtonState }
+)
+$appListCtrl.AddHandler(
+    [System.Windows.Controls.Primitives.ToggleButton]::UncheckedEvent,
+    [System.Windows.RoutedEventHandler]{ & $script:UpdateButtonState }
+)
+
 $updateNowBtn.Add_Click({
     $timer.Stop()
+    $script:AllowClose = $true
     $script:Action = 'UpdateNow'
     $window.Close()
 })
 
 $remindBtn.Add_Click({
     $timer.Stop()
+    $script:AllowClose = $true
     $script:Action = 'Remind'
     $window.Close()
 })
 
-# Closing via X button -- timer already stopped by button handlers if applicable,
-# but stop it here too in case the user closes the window directly.
-$window.Add_Closing({
-    $timer.Stop()
-})
-
-$timer.Start()
 $window.ShowDialog() | Out-Null
 #endregion INTERACTION LOGIC
 
 #region ACT ON CHOICE
+$WAURegPath = 'HKLM:\SOFTWARE\Romanitho\Winget-AutoUpdate'
+
 if ($script:Action -eq 'UpdateNow') {
+    $selectedApps = @($sortedRows | Where-Object { $_.IsSelected })
+
+    # Partial update: some (but not all) apps selected via checkboxes.
+    # Rewrite pending-updates.json with only selected apps so UpdateNow
+    # processes just those. Write NextPromptTime for the remainder.
+    if ($selectedApps.Count -gt 0 -and $selectedApps.Count -lt $sortedRows.Count) {
+        $selectedIds  = @($selectedApps | ForEach-Object { $_.Id })
+        $filteredApps = @($pendingData.Apps | Where-Object { $_.Id -in $selectedIds })
+
+        $jsonOut = [ordered]@{
+            Config = $pendingData.Config
+            Apps   = $filteredApps
+        }
+        $jsonOut | ConvertTo-Json -Depth 5 | Set-Content -Path $JsonPath -Encoding UTF8 -Force
+
+        # Remind for unselected apps
+        $nextPromptTime = (Get-Date).AddDays($reminderDays).ToString('o')
+        try {
+            Set-ItemProperty -Path $WAURegPath -Name 'NextPromptTime' -Value $nextPromptTime
+        }
+        catch { }
+    }
+
+    # Fire the UpdateNow task
     $updateTask = Get-ScheduledTask -TaskName 'Winget-AutoUpdate-UpdateNow' -ErrorAction SilentlyContinue
     if ($updateTask) {
         $updateTask | Start-ScheduledTask
     }
 }
-else {
+elseif ($script:Action -eq 'Remind') {
     # Snooze -- record when the next prompt is allowed so the main
     # SYSTEM task skips the prompt until this time has passed.
     $nextPromptTime = (Get-Date).AddDays($reminderDays).ToString('o')
-    $WAURegPath     = 'HKLM:\SOFTWARE\Romanitho\Winget-AutoUpdate'
     try {
         Set-ItemProperty -Path $WAURegPath -Name 'NextPromptTime' -Value $nextPromptTime
     }
-    catch {
-        # Non-fatal -- worst case WAU prompts again on next run
-    }
+    catch { }
 }
+# SilentDismiss: no action taken, no NextPromptTime written.
+# Next WAU run will re-prompt with fresh data.
 #endregion ACT ON CHOICE

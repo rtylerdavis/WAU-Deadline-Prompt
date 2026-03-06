@@ -31,4 +31,4 @@ ADMX/ADML policy definition files are included under `Sources/Policies/ADMX/` fo
 ## Future State
 
 - Potentially moving upstream to Romanitho's WAU - integrating a solution for auto update in the interim
-- Adding logic for per-app updates, rather than all or nothing
+- Adding logic for per-app updates, rather than all or nothing (in progress)

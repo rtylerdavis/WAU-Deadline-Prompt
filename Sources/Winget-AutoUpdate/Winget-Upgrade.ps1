@@ -162,10 +162,35 @@ if (Test-Network) {
                     Write-ToLog "-> $($app.Name) : $($app.Version) -> $($app.AvailableVersion)"
                     Update-App $app
                 }
-                Remove-Item -Path $userUpdateJson -Force -ErrorAction SilentlyContinue
+                try {
+                    Remove-Item -Path $userUpdateJson -Force -ErrorAction Stop
+                }
+                catch {
+                    Write-ToLog "WARNING: Could not delete user-context-update.json -- $($_.Exception.Message)" "Yellow"
+                }
                 if ($Script:InstallOK -gt 0) {
                     Write-ToLog "$Script:InstallOK user-context apps updated" "Green"
                 }
+
+                # Remove updated apps from user-context-outdated.json so SYSTEM
+                # doesn't re-merge stale entries on the next cycle.
+                $userOutdatedPath = [System.IO.Path]::Combine($env:ProgramData, 'Winget-AutoUpdate', 'user-context-outdated.json')
+                if (Test-Path $userOutdatedPath) {
+                    try {
+                        $updatedIds = @($userApps | ForEach-Object { $_.Id })
+                        $existingOutdated = @(Get-Content -Path $userOutdatedPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+                        $remaining = @($existingOutdated | Where-Object { $_.Id -notin $updatedIds })
+                        if ($remaining.Count -gt 0) {
+                            ConvertTo-Json -InputObject @($remaining) -Depth 3 | Set-Content -Path $userOutdatedPath -Encoding UTF8 -Force
+                        }
+                        else {
+                            Remove-Item -Path $userOutdatedPath -Force -ErrorAction SilentlyContinue
+                        }
+                        Write-ToLog "Removed $($updatedIds.Count) updated apps from user-context-outdated.json"
+                    }
+                    catch { }
+                }
+
                 Write-ToLog "End of user-context update process" "Cyan"
                 Start-Sleep 3
                 Exit 0
@@ -321,6 +346,28 @@ if (Test-Network) {
                 Remove-Item -Path $DeadlineRegPath -Recurse -Force -ErrorAction SilentlyContinue
                 Write-ToLog "Deadline mode disabled -- registry entries purged"
             }
+        }
+        # Ensure ProgramData shared directory exists and is writable by user context.
+        # SYSTEM creates the directory with Modify permission for Authenticated Users
+        # so that user context can create, overwrite, and delete JSON files there.
+        if ($Script:IsSystem -and $DeadlineDays -gt 0 -and $WAUConfig.WAU_UserContext -eq 1) {
+            $sharedDir = [System.IO.Path]::Combine($env:ProgramData, 'Winget-AutoUpdate')
+            if (-not (Test-Path $sharedDir)) {
+                New-Item -ItemType Directory -Path $sharedDir -Force | Out-Null
+            }
+            try {
+                $acl = Get-Acl $sharedDir
+                $authUsersRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    'Authenticated Users', 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+                if (-not ($acl.Access | Where-Object {
+                    $_.IdentityReference -eq 'NT AUTHORITY\Authenticated Users' -and
+                    $_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Modify
+                })) {
+                    $acl.SetAccessRule($authUsersRule)
+                    Set-Acl $sharedDir $acl
+                }
+            }
+            catch { }
         }
         #endregion DEADLINE CONFIG
 

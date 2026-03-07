@@ -93,23 +93,55 @@ Write-ToLog "$(@($pendingData.Apps).Count) apps queued for update"
 $Script:InstallOK = 0
 $DeadlineRegBase  = "HKLM:\SOFTWARE\Romanitho\Winget-AutoUpdate\UpdateDeadlines"
 
-foreach ($app in $pendingData.Apps) {
+# Split apps by scope -- user-scoped apps must be updated in user context.
+$machineApps = @($pendingData.Apps | Where-Object { $_.Scope -ne 'user' })
+$userApps    = @($pendingData.Apps | Where-Object { $_.Scope -eq 'user' })
 
-    Write-ToLog "-> $($app.Name) : $($app.Version) -> $($app.AvailableVersion)"
+if ($machineApps.Count -gt 0) {
+    Write-ToLog "$($machineApps.Count) machine-scoped apps to update"
+    foreach ($app in $machineApps) {
+        Write-ToLog "-> $($app.Name) : $($app.Version) -> $($app.AvailableVersion)"
 
-    Update-App $app
+        Update-App $app
 
-    # Confirm-Installation independently verifies success -- Update-App has no return value.
-    # Only purge the deadline entry once the new version is confirmed installed.
-    if (Confirm-Installation $app.Id $app.AvailableVersion) {
-        $AppRegPath = Join-Path $DeadlineRegBase $app.Id
-        if (Test-Path $AppRegPath) {
-            Remove-Item -Path $AppRegPath -Recurse -Force -ErrorAction SilentlyContinue
-            Write-ToLog "Deadline entry purged (update confirmed): $($app.Id)"
+        if (Confirm-Installation $app.Id $app.AvailableVersion) {
+            $AppRegPath = Join-Path $DeadlineRegBase $app.Id
+            if (Test-Path $AppRegPath) {
+                Remove-Item -Path $AppRegPath -Recurse -Force -ErrorAction SilentlyContinue
+                Write-ToLog "Deadline entry purged (update confirmed): $($app.Id)"
+            }
+        }
+        else {
+            Write-ToLog "$($app.Name) : update could not be confirmed -- deadline entry preserved for next run" "Yellow"
+        }
+    }
+}
+
+# User-scoped apps: hand off to user context task for update.
+# Deadline entries are cleaned up on the next SYSTEM cycle when the app
+# no longer appears in user-context-outdated.json (self-healing).
+if ($userApps.Count -gt 0) {
+    if ($Script:WAUConfig.WAU_UserContext -eq 1) {
+        $userUpdatePath = [System.IO.Path]::Combine($Script:WorkingDir, 'config', 'user-context-update.json')
+        try {
+            ConvertTo-Json -InputObject @($userApps) -Depth 3 | Set-Content -Path $userUpdatePath -Encoding UTF8 -Force
+            Write-ToLog "$($userApps.Count) user-scoped apps written to user-context-update.json"
+
+            $userContextTask = Get-ScheduledTask -TaskName 'Winget-AutoUpdate-UserContext' -ErrorAction SilentlyContinue
+            if ($userContextTask) {
+                $userContextTask | Start-ScheduledTask
+                Write-ToLog "UserContext task triggered for user-scoped updates"
+            }
+            else {
+                Write-ToLog "WARNING: UserContext task not found -- user-scoped apps will not be updated" "Yellow"
+            }
+        }
+        catch {
+            Write-ToLog "ERROR: Could not write user-context-update.json -- $($_.Exception.Message)" "Red"
         }
     }
     else {
-        Write-ToLog "$($app.Name) : update could not be confirmed -- deadline entry preserved for next run" "Yellow"
+        Write-ToLog "$($userApps.Count) user-scoped apps skipped (WAU_UserContext not enabled)" "Yellow"
     }
 }
 #endregion PROCESS UPDATES

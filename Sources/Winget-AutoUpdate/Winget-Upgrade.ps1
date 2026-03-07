@@ -141,6 +141,38 @@ if (Test-Network) {
 
     if ($Script:Winget) {
 
+        #region USER-CONTEXT UPDATE REQUEST
+        # When WAU-UpdateNow encounters user-scoped apps, it writes
+        # user-context-update.json and triggers the UserContext task.
+        # If that file exists, process those updates and exit.
+        if (-not $Script:IsSystem) {
+            $userUpdateJson = [System.IO.Path]::Combine($Script:WorkingDir, 'config', 'user-context-update.json')
+            if (Test-Path $userUpdateJson) {
+                $Script:InstallOK = 0
+                Write-ToLog "Processing user-context updates triggered by UpdateNow" "Cyan"
+                try {
+                    $userApps = @(Get-Content -Path $userUpdateJson -Raw -Encoding UTF8 | ConvertFrom-Json)
+                }
+                catch {
+                    Write-ToLog "ERROR: Could not parse user-context-update.json" "Red"
+                    Remove-Item -Path $userUpdateJson -Force -ErrorAction SilentlyContinue
+                    Exit 1
+                }
+                foreach ($app in $userApps) {
+                    Write-ToLog "-> $($app.Name) : $($app.Version) -> $($app.AvailableVersion)"
+                    Update-App $app
+                }
+                Remove-Item -Path $userUpdateJson -Force -ErrorAction SilentlyContinue
+                if ($Script:InstallOK -gt 0) {
+                    Write-ToLog "$Script:InstallOK user-context apps updated" "Green"
+                }
+                Write-ToLog "End of user-context update process" "Cyan"
+                Start-Sleep 3
+                Exit 0
+            }
+        }
+        #endregion USER-CONTEXT UPDATE REQUEST
+
         if ($true -eq $IsSystem) {
 
             #Get Current Version
@@ -270,8 +302,8 @@ if (Test-Network) {
         }
 
         #region DEADLINE CONFIG
-        # Read update deadline settings (both system and user context need to know if
-        # deadline mode is active so that user context can skip its update loop).
+        # Read update deadline settings. Both contexts need to know if deadline mode
+        # is active: SYSTEM manages deadlines, user context detects user-scoped apps.
         # DeadlineDays = 0 means deadline mode is disabled -- normal silent update behaviour applies.
         [int]$DeadlineDays = 0
         [int]$ReminderIntervalDays = 2
@@ -324,7 +356,32 @@ if (Test-Network) {
             # In user context, skip all updates when deadline mode is active --
             # the SYSTEM task manages updates via the deadline prompt workflow.
             if ($DeadlineDays -gt 0 -and -not $Script:IsSystem) {
-                Write-ToLog "Deadline mode active -- skipping user context updates (managed by SYSTEM task)" "Gray"
+                # User context + deadline mode: detect outdated apps and save for
+                # SYSTEM to merge into deadline tracking on its next run.
+                if ($UseWhiteList) {
+                    $userEligible = @($outdated | Where-Object {
+                        $id = $_.Id
+                        ($toUpdate -contains $id) -or ($toUpdate | Where-Object { $id -like $_ })
+                    })
+                }
+                else {
+                    $userEligible = @($outdated | Where-Object {
+                        $id = $_.Id
+                        -not ($toSkip -contains $id) -and -not ($toSkip | Where-Object { $id -like $_ })
+                    })
+                }
+
+                $userOutdatedPath = [System.IO.Path]::Combine($Script:WorkingDir, 'config', 'user-context-outdated.json')
+                if ($userEligible.Count -gt 0) {
+                    ConvertTo-Json -InputObject @($userEligible) -Depth 3 | Set-Content -Path $userOutdatedPath -Encoding UTF8 -Force
+                    Write-ToLog "$($userEligible.Count) user-context outdated apps written for deadline tracking" "Cyan"
+                }
+                else {
+                    if (Test-Path $userOutdatedPath) {
+                        Remove-Item -Path $userOutdatedPath -Force -ErrorAction SilentlyContinue
+                    }
+                    Write-ToLog "No user-context apps eligible for deadline tracking" "Gray"
+                }
             }
             elseif ($DeadlineDays -gt 0 -and $Script:IsSystem) {
 
@@ -353,6 +410,34 @@ if (Test-Network) {
                     }
                 }
 
+                # Merge user-context outdated apps if UserContext is enabled.
+                # The file is written by the user-context run on the previous cycle.
+                if ($WAUConfig.WAU_UserContext -eq 1) {
+                    $userOutdatedPath = [System.IO.Path]::Combine($Script:WorkingDir, 'config', 'user-context-outdated.json')
+                    if (Test-Path $userOutdatedPath) {
+                        try {
+                            $userContextApps = @(Get-Content -Path $userOutdatedPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+                            foreach ($uApp in $userContextApps) {
+                                if (-not ($deadlineApps | Where-Object { $_.Id -eq $uApp.Id })) {
+                                    $uApp | Add-Member -NotePropertyName 'Scope' -NotePropertyValue 'user' -Force
+                                    $deadlineApps += $uApp
+                                }
+                            }
+                            Write-ToLog "$($userContextApps.Count) user-context apps merged for deadline tracking"
+                        }
+                        catch {
+                            Write-ToLog "WARNING: Could not read user-context-outdated.json -- $($_.Exception.Message)" "Yellow"
+                        }
+                    }
+                }
+
+                # Tag machine-scope apps
+                foreach ($mApp in $deadlineApps) {
+                    if (-not ($mApp.PSObject.Properties.Name -contains 'Scope')) {
+                        $mApp | Add-Member -NotePropertyName 'Scope' -NotePropertyValue 'machine' -Force
+                    }
+                }
+
                 # Step 1: Sync deadline registry.
                 # First call with -OutdatedApps purges entries for apps no longer outdated
                 # (e.g. user self-updated outside WAU). Second call refreshes our working list.
@@ -367,7 +452,20 @@ if (Test-Network) {
                 $overdueEntries = @($deadlines | Where-Object { $_.Deadline.Date -lt $today })
                 $pendingEntries = @($deadlines | Where-Object { $_.Deadline.Date -ge $today })
 
-                Write-ToLog "Deadline summary: $($overdueEntries.Count) overdue, $($pendingEntries.Count) pending"
+                # User-scoped overdue apps cannot be force-updated by SYSTEM.
+                # Move them to pending so they appear in the prompt instead.
+                $overdueUserIds = @($overdueEntries | ForEach-Object {
+                    $appId = $_.AppId
+                    $app = $deadlineApps | Where-Object { $_.Id -eq $appId } | Select-Object -First 1
+                    if ($app -and $app.Scope -eq 'user') { $appId }
+                })
+                if ($overdueUserIds.Count -gt 0) {
+                    $pendingEntries = @($pendingEntries) + @($overdueEntries | Where-Object { $_.AppId -in $overdueUserIds })
+                    $overdueEntries = @($overdueEntries | Where-Object { $_.AppId -notin $overdueUserIds })
+                    Write-ToLog "$($overdueUserIds.Count) overdue user-scoped apps moved to prompt" "DarkYellow"
+                }
+
+                Write-ToLog "Deadline summary: $($overdueEntries.Count) overdue (machine), $($pendingEntries.Count) pending"
 
                 # Step 3: Forced background update for overdue apps -- no dialog shown.
                 if ($overdueEntries.Count -gt 0) {
@@ -431,6 +529,7 @@ if (Test-Network) {
                                         Version          = $app.Version
                                         AvailableVersion = $entry.AvailableVersion
                                         Deadline         = $entry.Deadline.ToString('yyyy-MM-dd')
+                                        Scope            = if ($app.Scope) { $app.Scope } else { 'machine' }
                                     }
                                 }
                             })
@@ -438,9 +537,7 @@ if (Test-Network) {
                             if ($promptApps.Count -gt 0) {
                                 $companyName = if ($WAUConfig.WAU_CompanyName) { $WAUConfig.WAU_CompanyName } else { '' }
                                 Start-UpdatePromptTask -PendingApps $promptApps -ReminderIntervalDays $ReminderIntervalDays -CompanyName $companyName
-                                Write-ToLog "End of process (prompt fired)!" "Cyan"
-                                Start-Sleep 3
-                                Exit 0
+                                Write-ToLog "Update prompt fired for $($promptApps.Count) apps"
                             }
                         }
                     }

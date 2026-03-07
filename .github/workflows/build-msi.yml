@@ -33,6 +33,8 @@ jobs:
           Copy-Item "Sources\Winget-AutoUpdate\functions\Get-UpdateDeadlines.ps1"        "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\functions\" -Force
           Copy-Item "Sources\Winget-AutoUpdate\functions\Set-UpdateDeadline.ps1"         "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\functions\" -Force
           Copy-Item "Sources\Winget-AutoUpdate\functions\Start-UpdatePromptTask.ps1"     "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\functions\" -Force
+          New-Item -ItemType Directory -Path "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\icons" -Force | Out-Null
+          Copy-Item "Sources\Winget-AutoUpdate\icons\notify_icon.png"                    "Winget-AutoUpdate-main\Sources\Winget-AutoUpdate\icons\" -Force
           Copy-Item "Sources\Policies\ADMX\WAU.admx"                                    "Winget-AutoUpdate-main\Sources\Policies\ADMX\" -Force
           Copy-Item "Sources\Policies\ADMX\en-US\WAU.adml"                              "Winget-AutoUpdate-main\Sources\Policies\ADMX\en-US\" -Force
 

@@ -172,23 +172,23 @@ if (Test-Network) {
                     Write-ToLog "$Script:InstallOK user-context apps updated" "Green"
                 }
 
-                # Remove updated apps from user-context-outdated.json so SYSTEM
-                # doesn't re-merge stale entries on the next cycle.
-                $userOutdatedPath = [System.IO.Path]::Combine($env:ProgramData, 'Winget-AutoUpdate', 'user-context-outdated.json')
+                # Remove only updated apps from user-context-outdated.csv.
+                # Deleting the entire file would cause the next SYSTEM cycle to
+                # purge deadline registry entries for apps that weren't updated
+                # (they wouldn't be in $deadlineApps), resetting their clocks.
+                $userOutdatedPath = [System.IO.Path]::Combine($env:ProgramData, 'Winget-AutoUpdate', 'user-context-outdated.csv')
                 if (Test-Path $userOutdatedPath) {
-                    try {
-                        $updatedIds = @($userApps | ForEach-Object { $_.Id })
-                        $existingOutdated = @(Get-Content -Path $userOutdatedPath -Raw -Encoding UTF8 | ConvertFrom-Json)
-                        $remaining = @($existingOutdated | Where-Object { $_.Id -notin $updatedIds })
-                        if ($remaining.Count -gt 0) {
-                            ConvertTo-Json -InputObject @($remaining) -Depth 3 | Set-Content -Path $userOutdatedPath -Encoding UTF8 -Force
-                        }
-                        else {
-                            Remove-Item -Path $userOutdatedPath -Force -ErrorAction SilentlyContinue
-                        }
-                        Write-ToLog "Removed $($updatedIds.Count) updated apps from user-context-outdated.json"
+                    $updatedIds = @($userApps | ForEach-Object { $_.Id })
+                    $remaining = @(Import-Csv -Path $userOutdatedPath -Encoding UTF8 |
+                        Where-Object { $_.Id -notin $updatedIds })
+                    if ($remaining.Count -gt 0) {
+                        $remaining | Export-Csv -Path $userOutdatedPath -NoTypeInformation -Encoding UTF8 -Force
+                        Write-ToLog "Removed $($updatedIds.Count) updated apps from user-context-outdated.csv ($($remaining.Count) remaining)"
                     }
-                    catch { }
+                    else {
+                        Remove-Item -Path $userOutdatedPath -Force -ErrorAction SilentlyContinue
+                        Write-ToLog "Cleared user-context-outdated.csv (all apps updated)"
+                    }
                 }
 
                 Write-ToLog "End of user-context update process" "Cyan"
@@ -420,9 +420,13 @@ if (Test-Network) {
 
                 $userOutdatedDir = [System.IO.Path]::Combine($env:ProgramData, 'Winget-AutoUpdate')
                 if (-not (Test-Path $userOutdatedDir)) { New-Item -ItemType Directory -Path $userOutdatedDir -Force | Out-Null }
-                $userOutdatedPath = [System.IO.Path]::Combine($userOutdatedDir, 'user-context-outdated.json')
+                $userOutdatedPath = [System.IO.Path]::Combine($userOutdatedDir, 'user-context-outdated.csv')
+                # Clean up old JSON format if present (migrated to CSV)
+                $oldJsonPath = [System.IO.Path]::Combine($userOutdatedDir, 'user-context-outdated.json')
+                if (Test-Path $oldJsonPath) { Remove-Item -Path $oldJsonPath -Force -ErrorAction SilentlyContinue }
                 if ($userEligible.Count -gt 0) {
-                    ConvertTo-Json -InputObject @($userEligible) -Depth 3 | Set-Content -Path $userOutdatedPath -Encoding UTF8 -Force -ErrorAction Stop
+                    $userEligible | Select-Object Name, Id, Version, AvailableVersion |
+                        Export-Csv -Path $userOutdatedPath -NoTypeInformation -Encoding UTF8 -Force -ErrorAction Stop
                     Write-ToLog "$($userEligible.Count) user-context outdated apps written for deadline tracking" "Cyan"
                 }
                 else {
@@ -460,13 +464,16 @@ if (Test-Network) {
                 }
 
                 # Merge user-context outdated apps if UserContext is enabled.
-                # The file is written by the user-context run on the previous cycle.
+                # The CSV file is written by the user-context run on the previous cycle.
+                # CSV is used instead of JSON to avoid PS 5.1 ConvertFrom-Json
+                # serialization artifacts that corrupt object properties on round-trip.
                 if ($WAUConfig.WAU_UserContext -eq 1) {
-                    $userOutdatedPath = [System.IO.Path]::Combine($env:ProgramData, 'Winget-AutoUpdate', 'user-context-outdated.json')
+                    $userOutdatedPath = [System.IO.Path]::Combine($env:ProgramData, 'Winget-AutoUpdate', 'user-context-outdated.csv')
                     if (Test-Path $userOutdatedPath) {
                         try {
-                            $userContextApps = @(Get-Content -Path $userOutdatedPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+                            $userContextApps = @(Import-Csv -Path $userOutdatedPath -Encoding UTF8)
                             foreach ($uApp in $userContextApps) {
+                                if (-not $uApp.Id) { continue }
                                 if (-not ($deadlineApps | Where-Object { $_.Id -eq $uApp.Id })) {
                                     $uApp | Add-Member -NotePropertyName 'Scope' -NotePropertyValue 'user' -Force
                                     $deadlineApps += $uApp
@@ -475,7 +482,7 @@ if (Test-Network) {
                             Write-ToLog "$($userContextApps.Count) user-context apps merged for deadline tracking"
                         }
                         catch {
-                            Write-ToLog "WARNING: Could not read user-context-outdated.json -- $($_.Exception.Message)" "Yellow"
+                            Write-ToLog "WARNING: Could not read user-context-outdated.csv -- $($_.Exception.Message)" "Yellow"
                         }
                     }
                 }

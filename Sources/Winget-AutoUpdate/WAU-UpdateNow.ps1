@@ -119,7 +119,7 @@ if ($machineApps.Count -gt 0) {
 
 # User-scoped apps: hand off to user context task for update.
 # Deadline entries are cleaned up on the next SYSTEM cycle when the app
-# no longer appears in user-context-outdated.json (self-healing).
+# no longer appears in user-context-outdated.csv (self-healing).
 if ($userApps.Count -gt 0) {
     if ($Script:WAUConfig.WAU_UserContext -eq 1) {
         $userUpdateDir = [System.IO.Path]::Combine($env:ProgramData, 'Winget-AutoUpdate')

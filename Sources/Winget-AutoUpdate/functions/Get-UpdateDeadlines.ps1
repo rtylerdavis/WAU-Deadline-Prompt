@@ -39,15 +39,24 @@ function Get-UpdateDeadlines {
         return $deadlines
     }
 
+    # Build an explicit ID set for purge comparison. Using a hashtable avoids
+    # any subtle issues with Where-Object pipeline on JSON-deserialized objects.
+    $outdatedIdSet = $null
+    if ($PSBoundParameters.ContainsKey('OutdatedApps')) {
+        $outdatedIdSet = @{}
+        foreach ($oa in $OutdatedApps) {
+            if ($oa.Id) { $outdatedIdSet[$oa.Id] = $true }
+        }
+    }
+
     foreach ($entry in $entries) {
 
         $appId = $entry.PSChildName
 
         # When OutdatedApps is supplied, purge entries for apps that are no longer outdated.
         # This covers apps the user updated manually outside of WAU.
-        if ($PSBoundParameters.ContainsKey('OutdatedApps')) {
-            $stillOutdated = $OutdatedApps | Where-Object { $_.Id -eq $appId }
-            if (-not $stillOutdated) {
+        if ($null -ne $outdatedIdSet) {
+            if (-not $outdatedIdSet.ContainsKey($appId)) {
                 Write-ToLog "Deadline purged (app no longer outdated): $appId"
                 Remove-Item -Path $entry.PSPath -Recurse -Force -ErrorAction SilentlyContinue
                 continue
